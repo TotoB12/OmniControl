@@ -19,12 +19,40 @@ from threading import Thread
 import requests
 import json
 import ast
+from dotenv import load_dotenv
+import google.generativeai as genai
+import PIL.Image
+import typing_extensions
+from datetime import datetime
+
+# Load environment variables
+load_dotenv()
+genai.configure(api_key=os.environ["API_KEY"])
 
 # Window configuration
 Window.size = (1024, 768)
 Window.top = 100
 Window.left = 100
 Window.borderless = False
+
+parser_address = "http://127.0.0.1:7860"
+
+# class Action(typing_extensions.TypedDict):
+#     reasoning: str
+#     action_type: str
+#     action_element_id: str
+#     value: str
+
+class EventLog:
+    def __init__(self):
+        self.events = []
+    
+    def add_event(self, event_type: str, message: str):
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        self.events.append(f"[{timestamp}] [{event_type}] {message}")
+    
+    def get_formatted_log(self):
+        return "\n".join(self.events)
 
 class ScrollableLabel(ScrollView):
     text = ObjectProperty('')
@@ -54,6 +82,59 @@ class MyAppLayout(BoxLayout):
         self.padding = dp(10)
         self.spacing = dp(10)
         
+        # Initialize event log
+        self.event_log = EventLog()
+        
+        # Initialize AI model
+        self.model = genai.GenerativeModel(
+            "gemini-1.5-flash",
+            generation_config=genai.GenerationConfig(
+                response_mime_type="application/json",
+            ),
+            system_instruction=(
+                """
+                You are an AI assistant designed to completed the user's objective by providing executing actions step-by-step on the user's machine. You will be provided with an annotated screenshot of the user's screen, and will have to determine the best next action to take in order to achieve the goal. You can interact with the screen by clicking, typing, and scrolling. You should always follow this format when providing an action:
+
+                [
+                    {
+                        "reasoning": "Explain why you are taking this action; required.",
+                        "action_type": "The type of action to take (click, type, scroll); required.",
+                        "action_element_id": "The numeral ID of the element to interact with; required.",
+                        "value": "The value to type in the element; optional."
+                    }
+                ]                
+                
+                Here are some examples of actions you can take:
+
+                [
+                    {
+                        "reasoning": "Click the 'Submit' button to submit the form.",
+                        "action_type": "click",
+                        "action_element_id": "45"
+                    }
+                ]
+
+                [
+                    {
+                        "reasoning": "Type 'hello' in the text box.",
+                        "action_type": "type",
+                        "action_element_id": "12",
+                        "value": "hello"
+                    }
+                ]
+
+                [
+                    {
+                        "reasoning": "Scroll down to view more content.",
+                        "action_type": "scroll",
+                        "action_element_id": "103"
+                    }
+                ]
+                """
+            )
+        )
+        self.chat = self.model.start_chat()
+        
         # Create UI elements
         self._create_input_section()
         self._create_content_section()
@@ -61,6 +142,9 @@ class MyAppLayout(BoxLayout):
         
         # Initialize processing state
         self.processing = False
+        
+        self.event_log.add_event("INIT", "Application started")
+        self._update_event_log()
 
     def _create_input_section(self):
         input_layout = BoxLayout(size_hint_y=None, height=50, spacing=10)
@@ -96,17 +180,17 @@ class MyAppLayout(BoxLayout):
         self.screenshot_image = Image(allow_stretch=True)
         left_panel.add_widget(self.screenshot_image)
         
-        # Right side - Parser Results
+        # Right side - Event Log
         right_panel = BoxLayout(orientation='vertical', size_hint_x=0.5)
         right_panel.add_widget(Label(
-            text='Parser Results',
+            text='Event Log',
             size_hint_y=None,
             height=30,
             bold=True
         ))
         
-        self.results_view = ScrollableLabel(size_hint=(1, 1))
-        right_panel.add_widget(self.results_view)
+        self.event_view = ScrollableLabel(size_hint=(1, 1))
+        right_panel.add_widget(self.event_view)
         
         content_layout.add_widget(left_panel)
         content_layout.add_widget(right_panel)
@@ -121,11 +205,16 @@ class MyAppLayout(BoxLayout):
         )
         self.add_widget(self.status_label)
 
+    def _update_event_log(self):
+        self.event_view.update_text(self.event_log.get_formatted_log())
+
     def take_screenshot(self, *args):
         if self.processing:
             return
             
         self.processing = True
+        self.event_log.add_event("SCREEN", "Taking screenshot...")
+        self._update_event_log()
         self.status_label.text = "Taking screenshot..."
         Window.minimize()
         Clock.schedule_once(self._capture_and_process, 0.2)
@@ -141,6 +230,9 @@ class MyAppLayout(BoxLayout):
             screenshot.save(self.screenshot_path)
             Window.restore()
             
+            self.event_log.add_event("SCREEN", f"Screenshot saved: {self.screenshot_path}")
+            self._update_event_log()
+            
             # Update screenshot display immediately
             Clock.schedule_once(lambda dt: self._update_screenshot(self.screenshot_path))
             
@@ -148,7 +240,10 @@ class MyAppLayout(BoxLayout):
             Thread(target=self._process_with_omniparser).start()
             
         except Exception as e:
-            self.status_label.text = f"Error taking screenshot: {str(e)}"
+            error_msg = f"Error taking screenshot: {str(e)}"
+            self.event_log.add_event("ERROR", error_msg)
+            self._update_event_log()
+            self.status_label.text = error_msg
             self.processing = False
 
     def _update_screenshot(self, path):
@@ -157,6 +252,8 @@ class MyAppLayout(BoxLayout):
 
     def _process_with_omniparser(self):
         try:
+            self.event_log.add_event("PARSER", "Processing with OmniParser...")
+            self._update_event_log()
             self.status_label.text = "Processing with OmniParser..."
             
             # Convert image to base64
@@ -178,7 +275,7 @@ class MyAppLayout(BoxLayout):
             }
             
             # Send POST request
-            post_url = 'http://127.0.0.1:7860/gradio_api/call/process'
+            post_url = parser_address + '/gradio_api/call/process'
             post_response = requests.post(post_url, json=payload)
             
             if post_response.status_code != 200:
@@ -186,13 +283,14 @@ class MyAppLayout(BoxLayout):
             
             # Get event_id
             event_id = post_response.json().get('event_id')
-            print(f"Event ID: {event_id}")
+            self.event_log.add_event("PARSER", f"Processing event ID: {event_id}")
+            self._update_event_log()
             
             if not event_id:
                 raise Exception("No event_id returned from POST request")
             
             # Poll for the result
-            get_url = f'http://127.0.0.1:7860/gradio_api/call/process/{event_id}'
+            get_url = parser_address + f'/gradio_api/call/process/{event_id}'
             get_response = requests.get(get_url, stream=True)
             
             if get_response.status_code != 200:
@@ -200,71 +298,97 @@ class MyAppLayout(BoxLayout):
             
             # Read the stream
             result_data = None
-            event = None
             for line in get_response.iter_lines(decode_unicode=True):
-                if line:
-                    if line.startswith('event:'):
-                        event = line[len('event:'):].strip()
-                        # print(f"Event: {event}")
-                    elif line.startswith('data:'):
-                        data_line = line[len('data:'):].strip()
-                        # data_line is JSON string
-                        result_data = json.loads(data_line)
-                        # print(f"Data: {result_data}")
-                        if event == 'complete':
-                            break
+                if line and line.startswith('data:'):
+                    data_line = line[len('data:'):].strip()
+                    result_data = json.loads(data_line)
+                    if result_data:
+                        break
             
             if result_data is None:
                 raise Exception("No data received from GET request")
 
-            url = f"http://127.0.0.1:7860/gradio_api/file={result_data[0].get('path')}"
-            text = result_data[1]
-            coordinates = ast.literal_eval(result_data[2])
-
-            output = {
-                "url": url,
-                "text": text,
-                "coordinates": coordinates
+            parsed_output = {
+                "url": parser_address + f"/gradio_api/file={result_data[0].get('path')}",
+                "text": result_data[1],
+                "coordinates": ast.literal_eval(result_data[2])
             }
-            print(f"Output: {output}")
             
-            # Update UI in the main thread
-            Clock.schedule_once(lambda dt: self._handle_parser_result(output))
+            self.event_log.add_event("PARSER", "OmniParser processing complete")
+            self.event_log.add_event("PARSER", f"Text output: {parsed_output['text']}")
+            self._update_event_log()
+
+            self.screenshot_image.source = parsed_output["url"]
+            self.screenshot_image.reload()
+            
+            # Process with AI in a separate thread
+            Thread(target=self._process_with_ai, args=(parsed_output,)).start()
             
         except Exception as e:
             error_message = str(e)
             Clock.schedule_once(lambda dt: self._handle_parser_error(error_message))
 
+    def _process_with_ai(self, parser_output):
+        try:
+            self.event_log.add_event("AI", "Starting AI analysis...")
+            self._update_event_log()
+            
+            # Load the annotated image
+            image = PIL.Image.open(self.screenshot_path)
+            
+            # Prepare the prompt with the user's objective and parser output
+            prompt = [
+                f"User objective:\n\n```{self.user_input.text}\n```\n\n"
+                f"Screen elements detected:\n\n```{parser_output['text']}\n```",
+                image
+            ]
+            
+            # Send to AI
+            response = self.chat.send_message(prompt)
+            
+            Clock.schedule_once(lambda dt: self._handle_ai_response(response.text))
+            
+        except Exception as e:
+            error_message = str(e)
+            Clock.schedule_once(lambda dt: self._handle_ai_error(error_message))
+
     def _handle_parser_result(self, result_data):
-        parsed_image_url = result_data["url"]
-        parsed_text = result_data["text"] + "\n\n" + str(result_data["coordinates"])
+        self.event_log.add_event("PARSER", "Parser processing complete")
+        self._update_event_log()
         
-        # Update the results text
-        self.results_view.update_text(self._format_parser_results(parsed_text))
-        
-        # Update the image if a URL was returned
-        if parsed_image_url:
-            self.screenshot_image.source = parsed_image_url
+        if result_data.get("url"):
+            self.screenshot_image.source = result_data["url"]
             self.screenshot_image.reload()
         
         self.status_label.text = "Processing complete"
-        self.processing = False
 
     def _handle_parser_error(self, error_message):
+        self.event_log.add_event("ERROR", f"Parser error: {error_message}")
+        self._update_event_log()
         self.status_label.text = f"Error: {error_message}"
-        self.results_view.update_text(f"Error processing screenshot:\n{error_message}")
         self.processing = False
 
-    def _format_parser_results(self, parser_output):
-        formatted_text = "[b]Detected Elements:[/b]\n\n"
-        elements = parser_output.split('\n')
-        return formatted_text + "\n".join(f"• {element}" for element in elements if element.strip())
+    def _handle_ai_response(self, response_text):
+        self.event_log.add_event("AI", f"AI Response received:\n{response_text}")
+        self._update_event_log()
+        self.status_label.text = "AI processing complete"
+        self.processing = False
+
+    def _handle_ai_error(self, error_message):
+        self.event_log.add_event("ERROR", f"AI error: {error_message}")
+        self._update_event_log()
+        self.status_label.text = f"AI Error: {error_message}"
+        self.processing = False
 
     def start_job(self, instance):
         prompt = self.user_input.text
         if prompt.strip() == '':
             self.status_label.text = "Please enter a prompt."
+            self.event_log.add_event("ERROR", "Empty prompt")
+            self._update_event_log()
         elif not self.processing:
+            self.event_log.add_event("JOB", f"Starting new job with prompt: {prompt}")
+            self._update_event_log()
             self.status_label.text = f"Starting job: {prompt}"
             Clock.schedule_once(self.take_screenshot, 0.1)
 
