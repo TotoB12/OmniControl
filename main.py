@@ -101,8 +101,8 @@ class MyAppLayout(BoxLayout):
                 [
                     {
                         "reasoning": "Explain why you are taking this action; required.",
-                        "action_type": "The type of action to take (click, type, scroll); required.",
-                        "action_element_id": "The numeral ID of the element to interact with; required.",
+                        "action_type": "The type of action to take (click, type, scroll, complete); required.",
+                        "action_element_id": "The numeral ID of the element to interact with; required for click, type, scroll.",
                         "value": "The value to type in the element; optional."
                     }
                 ]
@@ -137,12 +137,12 @@ class MyAppLayout(BoxLayout):
 
                 You need to think logically and efficiently. You should always consider the context of your previous actions and think about your next steps carefully.
                 You should always analyze and understand the user's current screen. Determine what a human would do in this situation and act accordingly.
-                Once you have you have completed the user's objective, and have comfirmed it by objerving the screen, you can end the task by returning your COMPLETE message:
+                Once you have you have completed the user's objective, and have confirmed it by observing the screen, you can end the task by returning your COMPLETE message:
 
                 [
                     {
                         "reasoning": "The user's objective has been completed.",
-                        "action_type": "complete",
+                        "action_type": "complete"
                     }
                 ]
                 """
