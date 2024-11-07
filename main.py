@@ -25,6 +25,7 @@ import PIL.Image
 import typing_extensions
 from datetime import datetime
 from urllib.parse import quote
+import time
 
 # Load environment variables
 load_dotenv()
@@ -136,6 +137,14 @@ class MyAppLayout(BoxLayout):
 
                 You need to think logically and efficiently. You should always consider the context of your previous actions and think about your next steps carefully.
                 You should always analyze and understand the user's current screen. Determine what a human would do in this situation and act accordingly.
+                Once you have you have completed the user's objective, and have comfirmed it by objerving the screen, you can end the task by returning your COMPLETE message:
+
+                [
+                    {
+                        "reasoning": "The user's objective has been completed.",
+                        "action_type": "complete",
+                    }
+                ]
                 """
             )
         )
@@ -233,6 +242,7 @@ class MyAppLayout(BoxLayout):
             self.screenshot_path = os.path.join(temp_dir, f'screenshot_{timestamp}.png')
             
             screenshot = pyautogui.screenshot()
+            self.image_width, self.image_height = screenshot.size
             screenshot.save(self.screenshot_path)
             Window.restore()
             
@@ -274,7 +284,6 @@ class MyAppLayout(BoxLayout):
                         "size": os.path.getsize(self.screenshot_path),
                         "orig_name": os.path.basename(self.screenshot_path),
                         "mime_type": "image/png"
-                        # "path": "https://raw.githubusercontent.com/gradio-app/gradio/main/test/test_files/bus.png"
                     },
                     0.05,  # box_threshold
                     0.1    # iou_threshold
@@ -326,17 +335,19 @@ class MyAppLayout(BoxLayout):
             self.event_log.add_event("PARSER", f"Text output: {parsed_output['text']}")
             self._update_event_log()
 
+            self.parser_output = parsed_output  # Store parser output for later use
+            
             self.screenshot_image.source = parsed_output["url"]
             self.screenshot_image.reload()
             
             # Process with AI in a separate thread
-            Thread(target=self._process_with_ai, args=(parsed_output,)).start()
+            Thread(target=self._process_with_ai).start()
             
         except Exception as e:
             error_message = str(e)
             Clock.schedule_once(lambda dt: self._handle_parser_error(error_message))
 
-    def _process_with_ai(self, parser_output):
+    def _process_with_ai(self):
         try:
             self.event_log.add_event("AI", "Starting AI analysis...")
             self._update_event_log()
@@ -347,7 +358,7 @@ class MyAppLayout(BoxLayout):
             # Prepare the prompt with the user's objective and parser output
             prompt = [
                 f"User objective:\n\n```{self.user_input.text}\n```\n\n"
-                f"Screen elements detected:\n\n```{parser_output['text']}\n```",
+                f"Screen elements detected:\n\n```{self.parser_output['text']}\n```",
                 image
             ]
             
@@ -360,16 +371,6 @@ class MyAppLayout(BoxLayout):
             error_message = str(e)
             Clock.schedule_once(lambda dt: self._handle_ai_error(error_message))
 
-    def _handle_parser_result(self, result_data):
-        self.event_log.add_event("PARSER", "Parser processing complete")
-        self._update_event_log()
-        
-        if result_data.get("url"):
-            self.screenshot_image.source = result_data["url"]
-            self.screenshot_image.reload()
-        
-        self.status_label.text = "Processing complete"
-
     def _handle_parser_error(self, error_message):
         self.event_log.add_event("ERROR", f"Parser error: {error_message}")
         self._update_event_log()
@@ -379,14 +380,92 @@ class MyAppLayout(BoxLayout):
     def _handle_ai_response(self, response_text):
         self.event_log.add_event("AI", f"AI Response received:\n{response_text}")
         self._update_event_log()
-        self.status_label.text = "AI processing complete"
-        self.processing = False
+        self.status_label.text = "Executing action..."
+
+        try:
+            # Parse the AI response
+            actions = json.loads(response_text)
+            if not isinstance(actions, list) or len(actions) == 0:
+                raise ValueError("AI response is not a list or is empty")
+            action = actions[0]
+            reasoning = action.get("reasoning", "")
+            action_type = action.get("action_type", "").lower()
+            action_element_id = action.get("action_element_id", "")
+            value = action.get("value", "")
+
+            if not action_type or not action_element_id:
+                raise ValueError("Action type or action element ID missing in AI response")
+
+            # Log the action
+            self.event_log.add_event("AI", f"Action to perform: {action_type} on element ID {action_element_id}")
+            self.event_log.add_event("AI", f"Reasoning: {reasoning}")
+            self._update_event_log()
+
+            # Get the coordinates from parser_output
+            element_id = action_element_id
+            coordinates = self.parser_output['coordinates'].get(element_id)
+            if not coordinates:
+                raise ValueError(f"No coordinates found for element ID {element_id}")
+
+            # Coordinates are normalized [x_min, y_min, x_max, y_max]
+            x_min_norm, y_min_norm, x_max_norm, y_max_norm = coordinates
+
+            # Compute actual coordinates
+            x_min = x_min_norm * self.image_width
+            y_min = y_min_norm * self.image_height
+            x_max = x_max_norm * self.image_width
+            y_max = y_max_norm * self.image_height
+
+            # Get the center position
+            x_center = (x_min + (x_max / 2))
+            y_center = (y_min + (y_max / 2))
+
+            print(f"Action: {action_type}, Element ID: {action_element_id}, Value: {value}")
+            print(f"Coordinates: {x_min}, {y_min}, {x_max}, {y_max}")
+            print(f"Coordinates: {x_center}, {y_center}")
+
+            # Perform the action
+            if action_type == "click":
+                self._perform_click(x_center, y_center)
+            elif action_type == "type":
+                self._perform_type(x_center, y_center, value)
+            elif action_type == "scroll":
+                self._perform_scroll(x_center, y_center)
+            else:
+                raise ValueError(f"Unknown action type: {action_type}")
+
+            self.event_log.add_event("ACTION", f"Executed {action_type} on element ID {action_element_id}")
+            self._update_event_log()
+            self.status_label.text = "Action executed"
+
+        except Exception as e:
+            error_message = f"Error executing action: {str(e)}"
+            self.event_log.add_event("ERROR", error_message)
+            self._update_event_log()
+            self.status_label.text = error_message
+        finally:
+            self.processing = False
 
     def _handle_ai_error(self, error_message):
         self.event_log.add_event("ERROR", f"AI error: {error_message}")
         self._update_event_log()
         self.status_label.text = f"AI Error: {error_message}"
         self.processing = False
+
+    def _perform_click(self, x, y):
+        pyautogui.moveTo(x, y)
+        pyautogui.click()
+
+    def _perform_type(self, x, y, text):
+        pyautogui.moveTo(x, y)
+        pyautogui.click()
+        time.sleep(0.5)  # Wait half a second
+        pyautogui.typewrite(text)
+
+    def _perform_scroll(self, x, y):
+        pyautogui.moveTo(x, y)
+        pyautogui.click()
+        pyautogui.scroll(-500)  # Scroll down
 
     def start_job(self, instance):
         prompt = self.user_input.text
