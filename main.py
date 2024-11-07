@@ -178,7 +178,7 @@ class MyAppLayout(BoxLayout):
             }
             
             # Send POST request
-            post_url = 'https://totob12-omniparser.hf.space/gradio_api/call/process'
+            post_url = 'http://127.0.0.1:7860/gradio_api/call/process'
             post_response = requests.post(post_url, json=payload)
             
             if post_response.status_code != 200:
@@ -192,7 +192,7 @@ class MyAppLayout(BoxLayout):
                 raise Exception("No event_id returned from POST request")
             
             # Poll for the result
-            get_url = f'https://totob12-omniparser.hf.space/gradio_api/call/process/{event_id}'
+            get_url = f'http://127.0.0.1:7860/gradio_api/call/process/{event_id}'
             get_response = requests.get(get_url, stream=True)
             
             if get_response.status_code != 200:
@@ -217,7 +217,7 @@ class MyAppLayout(BoxLayout):
             if result_data is None:
                 raise Exception("No data received from GET request")
 
-            url = f"https://totob12-omniparser.hf.space/gradio_api/file={result_data[0].get('path')}"
+            url = f"http://127.0.0.1:7860/gradio_api/file={result_data[0].get('path')}"
             text = result_data[1]
             coordinates = ast.literal_eval(result_data[2])
 

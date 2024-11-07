@@ -1,10 +1,29 @@
-from gradio_client import Client, handle_file
+import google.generativeai as genai
+import os
+from dotenv import load_dotenv
+import typing_extensions
+import PIL.Image
+load_dotenv()
 
-client = Client("jadechoghari/OmniParser")
-result = client.predict(
-		image_input=handle_file('C:/Users/totob/OneDrive/PC/Documents/OmniControl/screenshot.png'),
-		box_threshold=0.05,
-		iou_threshold=0.1,
-		api_name="/process"
-)
-print(result)
+genai.configure(api_key=os.environ["API_KEY"])
+
+class Action(typing_extensions.TypedDict):
+	reasoning: str
+	action_type: str
+	action_element_id: str
+	value: str
+
+model = genai.GenerativeModel(
+	"gemini-1.5-flash",
+    generation_config=genai.GenerationConfig(
+        response_mime_type="application/json",
+        response_schema = list[Action]),
+    system_instruction="You are a helpfull assistant.",
+	)
+
+chat = model.start_chat()
+
+image = PIL.Image.open("screenshot.png")
+
+response = chat.send_message(["What is this?", image])
+print(response.text)
