@@ -24,6 +24,7 @@ import google.generativeai as genai
 import PIL.Image
 import typing_extensions
 from datetime import datetime
+from urllib.parse import quote
 
 # Load environment variables
 load_dotenv()
@@ -102,8 +103,9 @@ class MyAppLayout(BoxLayout):
                         "action_element_id": "The numeral ID of the element to interact with; required.",
                         "value": "The value to type in the element; optional."
                     }
-                ]                
-                
+                ]
+
+                You should only do one action at a time. Only respond with the next action to take.
                 Here are some examples of actions you can take:
 
                 [
