@@ -36,7 +36,8 @@ Window.top = 100
 Window.left = 100
 Window.borderless = False
 
-parser_address = "http://127.0.0.1:7860"
+# parser_address = "http://127.0.0.1:7860"
+parser_address = "https://microsoft-omniparser.hf.space"
 
 # class Action(typing_extensions.TypedDict):
 #     reasoning: str
@@ -94,7 +95,7 @@ class MyAppLayout(BoxLayout):
             ),
             system_instruction=(
                 """
-                You are an AI assistant designed to completed the user's objective by providing executing actions step-by-step on the user's machine. You will be provided with an annotated screenshot of the user's screen, and will have to determine the best next action to take in order to achieve the goal. You can interact with the screen by clicking, typing, and scrolling. You should always follow this format when providing an action:
+                You are an AI assistant designed to completed the user's objective by executing actions step-by-step on the user's machine. You are provided with an annotated screenshot of the user's screen, and have to determine the next best action to take in order to achieve the final goal. You can interact with the screen by clicking, typing, and scrolling. You should always follow this format when providing an action:
 
                 [
                     {
@@ -132,6 +133,9 @@ class MyAppLayout(BoxLayout):
                         "action_element_id": "103"
                     }
                 ]
+
+                You need to think logically and efficiently. You should always consider the context of your previous actions and think about your next steps carefully.
+                You should always analyze and understand the user's current screen. Determine what a human would do in this situation and act accordingly.
                 """
             )
         )
@@ -219,7 +223,7 @@ class MyAppLayout(BoxLayout):
         self._update_event_log()
         self.status_label.text = "Taking screenshot..."
         Window.minimize()
-        Clock.schedule_once(self._capture_and_process, 0.2)
+        Clock.schedule_once(self._capture_and_process, 0.4)
 
     def _capture_and_process(self, *args):
         try:
@@ -270,6 +274,7 @@ class MyAppLayout(BoxLayout):
                         "size": os.path.getsize(self.screenshot_path),
                         "orig_name": os.path.basename(self.screenshot_path),
                         "mime_type": "image/png"
+                        # "path": "https://raw.githubusercontent.com/gradio-app/gradio/main/test/test_files/bus.png"
                     },
                     0.05,  # box_threshold
                     0.1    # iou_threshold
@@ -315,6 +320,7 @@ class MyAppLayout(BoxLayout):
                 "text": result_data[1],
                 "coordinates": ast.literal_eval(result_data[2])
             }
+            print(parsed_output)
             
             self.event_log.add_event("PARSER", "OmniParser processing complete")
             self.event_log.add_event("PARSER", f"Text output: {parsed_output['text']}")
