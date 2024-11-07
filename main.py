@@ -96,7 +96,7 @@ class MyAppLayout(BoxLayout):
             ),
             system_instruction=(
                 """
-                You are an AI assistant designed to completed the user's objective by executing actions step-by-step on the user's machine. You are provided with an annotated screenshot of the user's screen, and have to determine the next best action to take in order to achieve the final goal. You can interact with the screen by clicking, typing, and scrolling. You should always follow this format when providing an action:
+                You are an AI assistant designed to complete the user's objective by executing actions step-by-step on the user's machine. You are provided with an annotated screenshot of the user's screen, and have to determine the next best action to take in order to achieve the final goal. You can interact with the screen by clicking, typing, and scrolling. You should always follow this format when providing an action:
 
                 [
                     {
