@@ -26,6 +26,7 @@ import typing_extensions
 from datetime import datetime
 from urllib.parse import quote
 import time
+import urllib.request
 
 # Load environment variables
 load_dotenv()
@@ -49,11 +50,11 @@ parser_address = "https://microsoft-omniparser.hf.space"
 class EventLog:
     def __init__(self):
         self.events = []
-    
+
     def add_event(self, event_type: str, message: str):
         timestamp = datetime.now().strftime("%H:%M:%S")
         self.events.append(f"[{timestamp}] [{event_type}] {message}")
-    
+
     def get_formatted_log(self):
         return "\n".join(self.events)
 
@@ -90,61 +91,61 @@ class MyAppLayout(BoxLayout):
         
         # Initialize AI model
         self.model = genai.GenerativeModel(
-            "gemini-1.5-flash",
+            "gemini-1.5-flash-002",
             generation_config=genai.GenerationConfig(
                 response_mime_type="application/json",
             ),
             system_instruction=(
                 """
-                You are an AI assistant designed to complete the user's objective by executing actions step-by-step on the user's machine. You are provided with an annotated screenshot of the user's screen, and have to determine the next best action to take in order to achieve the final goal. You can interact with the screen by clicking, typing, and scrolling. You should always follow this format when providing an action:
+You are an AI assistant designed to complete the user's objective by executing actions step-by-step on the user's machine. You are provided with an annotated screenshot of the user's screen, and have to determine the next best action to take in order to achieve the final goal. You can interact with the screen by clicking, typing, and scrolling. You should always follow this format when providing an action:
 
-                [
-                    {
-                        "reasoning": "Explain why you are taking this action; required.",
-                        "action_type": "The type of action to take (click, type, scroll, complete); required.",
-                        "action_element_id": "The numeral ID of the element to interact with; required for click, type, scroll.",
-                        "value": "The value to type in the element; optional."
-                    }
-                ]
+[
+    {
+        "reasoning": "Explain why you are taking this action; required.",
+        "action_type": "The type of action to take (click, type, scroll, complete); required.",
+        "action_element_id": "The numeral ID of the element to interact with; required for click, type, scroll.",
+        "value": "The value to type in the element; optional."
+    }
+]
 
-                You should only do one action at a time. Only respond with the next action to take.
-                Here are some examples of actions you can take:
+You should only do one action at a time. Only respond with the next action to take.
+Here are some examples of actions you can take:
 
-                [
-                    {
-                        "reasoning": "Click the 'Submit' button to submit the form.",
-                        "action_type": "click",
-                        "action_element_id": "45"
-                    }
-                ]
+[
+    {
+        "reasoning": "Click the 'Submit' button to submit the form.",
+        "action_type": "click",
+        "action_element_id": "45"
+    }
+]
 
-                [
-                    {
-                        "reasoning": "Type 'hello' in the text box.",
-                        "action_type": "type",
-                        "action_element_id": "12",
-                        "value": "hello"
-                    }
-                ]
+[
+    {
+        "reasoning": "Type 'hello' in the text box.",
+        "action_type": "type",
+        "action_element_id": "12",
+        "value": "hello"
+    }
+]
 
-                [
-                    {
-                        "reasoning": "Scroll down to view more content.",
-                        "action_type": "scroll",
-                        "action_element_id": "103"
-                    }
-                ]
+[
+    {
+        "reasoning": "Scroll down to view more content.",
+        "action_type": "scroll",
+        "action_element_id": "103"
+    }
+]
 
-                You need to think logically and efficiently. You should always consider the context of your previous actions and think about your next steps carefully.
-                You should always analyze and understand the user's current screen. Determine what a human would do in this situation and act accordingly.
-                Once you have you have completed the user's objective, and have confirmed it by observing the screen, you can end the task by returning your COMPLETE message:
+You need to think logically and efficiently. You should always consider the context of your previous actions and think about your next steps carefully.
+You should always analyze and understand the user's current screen. Determine what a human would do in this situation and act accordingly.
+Once you have you have completed the user's objective, and have confirmed it by observing the screen, you can end the task by returning your COMPLETE message:
 
-                [
-                    {
-                        "reasoning": "The user's objective has been completed.",
-                        "action_type": "complete"
-                    }
-                ]
+[
+    {
+        "reasoning": "The user's objective has been completed.",
+        "action_type": "complete"
+    }
+]
                 """
             )
         )
@@ -223,16 +224,28 @@ class MyAppLayout(BoxLayout):
     def _update_event_log(self):
         self.event_view.update_text(self.event_log.get_formatted_log())
 
+    def hide_app(self):
+        # Hide the app window
+        self.previous_opacity = Window.opacity
+        Window.opacity = 0
+        # Give some time for the window to hide
+        time.sleep(0.2)
+
+    def show_app(self):
+        # Restore the app window
+        Window.opacity = self.previous_opacity
+        # Give some time for the window to show
+        time.sleep(0.2)
+
     def take_screenshot(self, *args):
-        if self.processing:
-            return
-            
-        self.processing = True
         self.event_log.add_event("SCREEN", "Taking screenshot...")
         self._update_event_log()
         self.status_label.text = "Taking screenshot..."
-        Window.minimize()
-        Clock.schedule_once(self._capture_and_process, 0.4)
+
+        # Hide the app before taking the screenshot
+        self.hide_app()
+        # Schedule the screenshot after a short delay
+        Clock.schedule_once(self._capture_and_process, 0.5)
 
     def _capture_and_process(self, *args):
         try:
@@ -244,12 +257,13 @@ class MyAppLayout(BoxLayout):
             screenshot = pyautogui.screenshot()
             self.image_width, self.image_height = screenshot.size
             screenshot.save(self.screenshot_path)
-            Window.restore()
             
+            # Restore the app window
+            self.show_app()
             self.event_log.add_event("SCREEN", f"Screenshot saved: {self.screenshot_path}")
             self._update_event_log()
             
-            # Update screenshot display immediately
+            # Update screenshot display
             Clock.schedule_once(lambda dt: self._update_screenshot(self.screenshot_path))
             
             # Process with OmniParser in a separate thread
@@ -320,7 +334,8 @@ class MyAppLayout(BoxLayout):
                     result_data = json.loads(data_line)
                     if result_data:
                         break
-            
+            print(result_data)
+
             if result_data is None:
                 raise Exception("No data received from GET request")
 
@@ -329,17 +344,17 @@ class MyAppLayout(BoxLayout):
                 "text": result_data[1],
                 "coordinates": ast.literal_eval(result_data[2])
             }
-            print(parsed_output)
+            # print(parsed_output)
             
             self.event_log.add_event("PARSER", "OmniParser processing complete")
-            self.event_log.add_event("PARSER", f"Text output: {parsed_output['text']}")
+            # self.event_log.add_event("PARSER", f"Text output: {parsed_output['text']}")
             self._update_event_log()
 
             self.parser_output = parsed_output  # Store parser output for later use
-            
-            self.screenshot_image.source = parsed_output["url"]
-            self.screenshot_image.reload()
-            
+
+            # Update screenshot with annotations
+            Clock.schedule_once(lambda dt: self._update_screenshot(parsed_output["url"]))
+
             # Process with AI in a separate thread
             Thread(target=self._process_with_ai).start()
             
@@ -353,19 +368,23 @@ class MyAppLayout(BoxLayout):
             self._update_event_log()
             
             # Load the annotated image
-            image = PIL.Image.open(self.screenshot_path)
+            urllib.request.urlretrieve(self.parser_output["url"], "temp.png")
+            image = PIL.Image.open("temp.png")
             
             # Prepare the prompt with the user's objective and parser output
             prompt = [
-                f"User objective:\n\n```{self.user_input.text}\n```\n\n"
-                f"Screen elements detected:\n\n```{self.parser_output['text']}\n```",
-                image
+                image,
+                f"User objective:\n\n```\n{self.user_input.text}\n```\n\n"
+                f"Screen elements detected:\n\n```\n{self.parser_output['text']}\n```"
             ]
             
             # Send to AI
             response = self.chat.send_message(prompt)
             
             Clock.schedule_once(lambda dt: self._handle_ai_response(response.text))
+
+            # Clean up
+            os.remove("temp.png")
             
         except Exception as e:
             error_message = str(e)
@@ -393,13 +412,23 @@ class MyAppLayout(BoxLayout):
             action_element_id = action.get("action_element_id", "")
             value = action.get("value", "")
 
-            if not action_type or not action_element_id:
-                raise ValueError("Action type or action element ID missing in AI response")
-
             # Log the action
-            self.event_log.add_event("AI", f"Action to perform: {action_type} on element ID {action_element_id}")
+            self.event_log.add_event("AI", f"Action to perform: {action_type}")
+            if action_element_id:
+                self.event_log.add_event("AI", f"On element ID: {action_element_id}")
             self.event_log.add_event("AI", f"Reasoning: {reasoning}")
             self._update_event_log()
+
+            # Check for completion
+            if action_type == "complete":
+                self.event_log.add_event("JOB", "User objective completed.")
+                self._update_event_log()
+                self.status_label.text = "Objective completed."
+                self.processing = False
+                return  # Exit the loop
+
+            if not action_type or not action_element_id:
+                raise ValueError("Action type or action element ID missing in AI response")
 
             # Get the coordinates from parser_output
             element_id = action_element_id
@@ -422,8 +451,10 @@ class MyAppLayout(BoxLayout):
 
             print(f"Action: {action_type}, Element ID: {action_element_id}, Value: {value}")
             print(f"Coordinates: {x_min}, {y_min}, {x_max}, {y_max}")
-            print(f"Coordinates: {x_center}, {y_center}")
+            print(f"Center Coordinates: {x_center}, {y_center}")
 
+            # Hide the app before executing the action
+            self.hide_app()
             # Perform the action
             if action_type == "click":
                 self._perform_click(x_center, y_center)
@@ -434,16 +465,21 @@ class MyAppLayout(BoxLayout):
             else:
                 raise ValueError(f"Unknown action type: {action_type}")
 
+            # Restore the app window
+            self.show_app()
+
             self.event_log.add_event("ACTION", f"Executed {action_type} on element ID {action_element_id}")
             self._update_event_log()
             self.status_label.text = "Action executed"
+
+            # Continue the loop
+            Clock.schedule_once(lambda dt: self.take_screenshot(), 0.5)
 
         except Exception as e:
             error_message = f"Error executing action: {str(e)}"
             self.event_log.add_event("ERROR", error_message)
             self._update_event_log()
             self.status_label.text = error_message
-        finally:
             self.processing = False
 
     def _handle_ai_error(self, error_message):
@@ -464,7 +500,6 @@ class MyAppLayout(BoxLayout):
 
     def _perform_scroll(self, x, y):
         pyautogui.moveTo(x, y)
-        pyautogui.click()
         pyautogui.scroll(-500)  # Scroll down
 
     def start_job(self, instance):
@@ -477,6 +512,8 @@ class MyAppLayout(BoxLayout):
             self.event_log.add_event("JOB", f"Starting new job with prompt: {prompt}")
             self._update_event_log()
             self.status_label.text = f"Starting job: {prompt}"
+            self.processing = True
+            # Start the loop
             Clock.schedule_once(self.take_screenshot, 0.1)
 
 class MyKivyApp(App):
