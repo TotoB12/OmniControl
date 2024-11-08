@@ -281,95 +281,114 @@ Once you have you have completed the user's objective, and have confirmed it by 
         self.screenshot_image.reload()
 
     def _process_with_omniparser(self):
-        try:
-            self.event_log.add_event("PARSER", "Processing with OmniParser...")
-            self._update_event_log()
-            self.status_label.text = "Processing with OmniParser..."
-            
-            # Convert image to base64
-            with open(self.screenshot_path, "rb") as image_file:
-                encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
-            
-            # Prepare payload
-            payload = {
-                "data": [
-                    {
-                        "url": f"data:image/png;base64,{encoded_string}",
-                        "size": os.path.getsize(self.screenshot_path),
-                        "orig_name": os.path.basename(self.screenshot_path),
-                        "mime_type": "image/png"
-                    },
-                    0.05,  # box_threshold
-                    0.1    # iou_threshold
-                ]
-            }
-            
-            # Send POST request
-            post_url = parser_address + '/gradio_api/call/process'
-            post_response = requests.post(post_url, json=payload)
-            
-            if post_response.status_code != 200:
-                raise Exception(f"POST request failed with status code {post_response.status_code}")
-            
-            # Get event_id
-            event_id = post_response.json().get('event_id')
-            self.event_log.add_event("PARSER", f"Processing event ID: {event_id}")
-            self._update_event_log()
-            
-            if not event_id:
-                raise Exception("No event_id returned from POST request")
-            
-            # Poll for the result
-            get_url = parser_address + f'/gradio_api/call/process/{event_id}'
-            get_response = requests.get(get_url, stream=True)
-            
-            if get_response.status_code != 200:
-                raise Exception(f"GET request failed with status code {get_response.status_code}")
-            
-            # Read the stream
-            result_data = None
-            for line in get_response.iter_lines(decode_unicode=True):
-                if line and line.startswith('data:'):
-                    data_line = line[len('data:'):].strip()
-                    result_data = json.loads(data_line)
-                    if result_data:
-                        break
-            print(result_data)
+        max_retries = 3
+        retries = 0
+        while retries < max_retries:
+            try:
+                self.event_log.add_event("PARSER", f"Processing with OmniParser... (Attempt {retries + 1}/{max_retries})")
+                self._update_event_log()
+                self.status_label.text = f"Processing with OmniParser... (Attempt {retries + 1}/{max_retries})"
+                
+                # Convert image to base64
+                with open(self.screenshot_path, "rb") as image_file:
+                    encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
+                
+                # Prepare payload
+                payload = {
+                    "data": [
+                        {
+                            "url": f"data:image/png;base64,{encoded_string}",
+                            "size": os.path.getsize(self.screenshot_path),
+                            "orig_name": os.path.basename(self.screenshot_path),
+                            "mime_type": "image/png"
+                        },
+                        0.05,  # box_threshold
+                        0.1    # iou_threshold
+                    ]
+                }
+                
+                # Send POST request
+                post_url = parser_address + '/gradio_api/call/process'
+                post_response = requests.post(post_url, json=payload)
+                
+                if post_response.status_code != 200:
+                    raise Exception(f"POST request failed with status code {post_response.status_code}")
+                
+                # Get event_id
+                event_id = post_response.json().get('event_id')
+                self.event_log.add_event("PARSER", f"Processing event ID: {event_id}")
+                self._update_event_log()
+                
+                if not event_id:
+                    raise Exception("No event_id returned from POST request")
+                
+                # Poll for the result
+                get_url = parser_address + f'/gradio_api/call/process/{event_id}'
+                get_response = requests.get(get_url, stream=True)
+                
+                if get_response.status_code != 200:
+                    raise Exception(f"GET request failed with status code {get_response.status_code}")
+                
+                # Read the stream
+                result_data = None
+                for line in get_response.iter_lines(decode_unicode=True):
+                    if line and line.startswith('data:'):
+                        data_line = line[len('data:'):].strip()
+                        result_data = json.loads(data_line)
+                        if result_data:
+                            break
+                print(result_data)
 
-            if result_data is None:
-                raise Exception("No data received from GET request")
+                if result_data is None:
+                    raise Exception("No data received from GET request")
 
-            parsed_output = {
-                "url": parser_address + f"/gradio_api/file={result_data[0].get('path')}",
-                "text": result_data[1],
-                "coordinates": ast.literal_eval(result_data[2])
-            }
-            # print(parsed_output)
-            
-            self.event_log.add_event("PARSER", "OmniParser processing complete")
-            # self.event_log.add_event("PARSER", f"Text output: {parsed_output['text']}")
-            self._update_event_log()
+                parsed_output = {
+                    "url": parser_address + f"/gradio_api/file={result_data[0].get('path')}",
+                    "text": result_data[1],
+                    "coordinates": ast.literal_eval(result_data[2])
+                }
+                
+                self.event_log.add_event("PARSER", "OmniParser processing complete")
+                self._update_event_log()
 
-            self.parser_output = parsed_output  # Store parser output for later use
+                self.parser_output = parsed_output  # Store parser output for later use
 
-            # Update screenshot with annotations
-            Clock.schedule_once(lambda dt: self._update_screenshot(parsed_output["url"]))
+                # Update screenshot with annotations
+                Clock.schedule_once(lambda dt: self._update_screenshot(parsed_output["url"]))
 
-            # Process with AI in a separate thread
-            Thread(target=self._process_with_ai).start()
-            
-        except Exception as e:
-            error_message = str(e)
-            Clock.schedule_once(lambda dt: self._handle_parser_error(error_message))
+                # Process with AI in a separate thread
+                Thread(target=self._process_with_ai).start()
+                
+                # Parsing succeeded, exit the retry loop
+                break
+
+            except Exception as e:
+                retries += 1
+                error_message = str(e)
+                self.event_log.add_event("ERROR", f"Parser attempt {retries} failed: {error_message}")
+                self._update_event_log()
+                self.status_label.text = f"Parser attempt {retries} failed: {error_message}"
+                
+                if retries >= max_retries:
+                    # Handle the parser error after max retries
+                    Clock.schedule_once(lambda dt: self._handle_parser_error(error_message))
+                    break
+                else:
+                    # Wait before retrying
+                    time.sleep(1)
 
     def _process_with_ai(self):
         try:
             self.event_log.add_event("AI", "Starting AI analysis...")
             self._update_event_log()
             
-            # Load the annotated image
-            urllib.request.urlretrieve(self.parser_output["url"], "temp.png")
-            image = PIL.Image.open("temp.png")
+            # Download and load the annotated image from parser
+            annotated_image_response = requests.get(self.parser_output["url"])
+            temp_annotated_path = os.path.join(tempfile.gettempdir(), 'annotated.png')
+            with open(temp_annotated_path, 'wb') as f:
+                f.write(annotated_image_response.content)
+            
+            image = PIL.Image.open(temp_annotated_path)
             
             # Prepare the prompt with the user's objective and parser output
             prompt = [
@@ -382,9 +401,6 @@ Once you have you have completed the user's objective, and have confirmed it by 
             response = self.chat.send_message(prompt)
             
             Clock.schedule_once(lambda dt: self._handle_ai_response(response.text))
-
-            # Clean up
-            os.remove("temp.png")
             
         except Exception as e:
             error_message = str(e)
