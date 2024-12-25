@@ -38,7 +38,7 @@ Window.top = 100
 Window.left = 100
 Window.borderless = False
 
-# parser_address = "http://127.0.0.1:7860"
+# parser_address = "https://totob12-omniparser.hf.space/"
 parser_address = "https://microsoft-omniparser.hf.space"
 
 # class Action(typing_extensions.TypedDict):
@@ -465,18 +465,12 @@ You need to think logically and efficiently. You should always consider the cont
             if action_type not in ["complete", "keybind"] and not action_element_id:
                 raise ValueError("Action type requires an element ID, but none was provided.")
 
-            # If we need coordinates, attempt to retrieve them 
-            # from parser_output for click-like actions
             if action_type in ["click", "right_click", "type", "scroll"]:
-                element_id = action_element_id
-                coordinates = self.parser_output['coordinates'].get(element_id)
+                coordinates = self.parser_output['coordinates'].get(action_element_id)
                 if not coordinates:
-                    raise ValueError(f"No coordinates found for element ID {element_id}")
+                    raise ValueError(f"No coordinates found for element ID {action_element_id}")
 
-                # Coordinates are normalized [x_min, y_min, x_max, y_max]
                 x_min_norm, y_min_norm, x_max_norm, y_max_norm = coordinates
-
-                # Compute actual coordinates
                 x_min = x_min_norm * self.image_width
                 y_min = y_min_norm * self.image_height
                 x_max = x_max_norm * self.image_width
@@ -503,7 +497,6 @@ You need to think logically and efficiently. You should always consider the cont
                     raise ValueError(f"Unknown action type: {action_type}")
                 self.show_app()
 
-            
             elif action_type == "keybind":
                 self.hide_app()
                 self._perform_keybind(value)
@@ -535,33 +528,32 @@ You need to think logically and efficiently. You should always consider the cont
     def _perform_click(self, x, y):
         pyautogui.moveTo(x, y)
         pyautogui.click()
+        time.sleep(2)
 
     def _perform_right_click(self, x, y):
         pyautogui.moveTo(x, y)
         pyautogui.click(button='right')
+        time.sleep(2)
 
     def _perform_type(self, x, y, text):
         pyautogui.moveTo(x, y)
         pyautogui.click()
         time.sleep(0.5)
         pyautogui.typewrite(text)
+        time.sleep(2)
 
     def _perform_scroll(self, x, y):
         pyautogui.moveTo(x, y)
-        pyautogui.scroll(-500)  # Scroll down
+        pyautogui.scroll(-500)
+        time.sleep(2)
 
-    # ------------------------------------------------
-    # NEW: Perform keybind
-    # Example: value = "ctrl+c"
-    # We'll split on "+" and call pyautogui.hotkey
-    # ------------------------------------------------
     def _perform_keybind(self, combo_str):
         if not combo_str:
             raise ValueError("No keybind specified")
         keys = combo_str.lower().split("+")
-        # Cleanup in case of extra spaces
         keys = [k.strip() for k in keys if k.strip()]
         pyautogui.hotkey(*keys)
+        time.sleep(2)
 
     def start_job(self, instance):
         prompt = self.user_input.text
