@@ -58,6 +58,7 @@ class EventLog:
     def get_formatted_log(self):
         return "\n".join(self.events)
 
+
 class ScrollableLabel(ScrollView):
     text = ObjectProperty('')
 
@@ -79,6 +80,7 @@ class ScrollableLabel(ScrollView):
     def update_text(self, new_text):
         self.label.text = new_text
 
+
 class MyAppLayout(BoxLayout):
     def __init__(self, **kwargs):
         super(MyAppLayout, self).__init__(**kwargs)
@@ -91,31 +93,40 @@ class MyAppLayout(BoxLayout):
         
         # Initialize AI model
         self.model = genai.GenerativeModel(
-            "gemini-1.5-flash-002",
+            "gemini-2.0-flash-exp",
             generation_config=genai.GenerationConfig(
                 response_mime_type="application/json",
             ),
             system_instruction=(
                 """
-You are an AI assistant designed to complete the user's objective by executing actions step-by-step on the user's machine. You are provided with an annotated screenshot of the user's screen, and have to determine the next best action to take in order to achieve the final goal. You can interact with the screen by clicking, typing, and scrolling. You should always follow this format when providing an action:
+You are an AI assistant designed to complete the user's objective by executing actions step-by-step on the user's machine. You are provided with an annotated screenshot of the user's screen, and have to determine the next best action to take in order to achieve the final goal. You can interact with the screen by clicking, typing, scrolling, right-clicking, or pressing keybinds. You should always follow this format when providing an action:
 
 [
     {
         "reasoning": "Explain why you are taking this action; required.",
-        "action_type": "The type of action to take (click, type, scroll, complete); required.",
-        "action_element_id": "The numeral ID of the element to interact with; required for click, type, scroll.",
-        "value": "The value to type in the element; optional."
+        "action_type": "The type of action to take (click, right_click, type, scroll, keybind, complete); required.",
+        "action_element_id": "The numeral ID of the element to interact with, required for click/right_click/type/scroll.",
+        "value": "The value to type in the element, or the keybind combo to press. Optional unless relevant."
     }
 ]
 
 You should only do one action at a time. Only respond with the next action to take.
-Here are some examples of actions you can take:
+
+Here are examples of valid actions:
 
 [
     {
         "reasoning": "Click the 'Submit' button to submit the form.",
         "action_type": "click",
         "action_element_id": "45"
+    }
+]
+
+[
+    {
+        "reasoning": "Right-click this particular element.",
+        "action_type": "right_click",
+        "action_element_id": "22"
     }
 ]
 
@@ -136,9 +147,15 @@ Here are some examples of actions you can take:
     }
 ]
 
-You need to think logically and efficiently. You should always consider the context of your previous actions and think about your next steps carefully.
-You should always analyze and understand the user's current screen. Determine what a human would do in this situation and act accordingly.
-Once you have you have completed the user's objective, and have confirmed it by observing the screen, you can end the task by returning your COMPLETE message:
+[
+    {
+        "reasoning": "Press ctrl+c to copy text.",
+        "action_type": "keybind",
+        "value": "ctrl+c"
+    }
+]
+
+You need to think logically and efficiently. You should always consider the context of your previous actions. Once you have completed the user's objective and confirmed it by observing the screen, return your COMPLETE message:
 
 [
     {
@@ -191,7 +208,6 @@ Once you have you have completed the user's objective, and have confirmed it by 
             text='Screenshot',
             size_hint_y=None,
             height=30,
-            bold=True
         ))
         self.screenshot_image = Image(allow_stretch=True)
         left_panel.add_widget(self.screenshot_image)
@@ -202,7 +218,6 @@ Once you have you have completed the user's objective, and have confirmed it by 
             text='Event Log',
             size_hint_y=None,
             height=30,
-            bold=True
         ))
         
         self.event_view = ScrollableLabel(size_hint=(1, 1))
@@ -337,7 +352,6 @@ Once you have you have completed the user's objective, and have confirmed it by 
                         result_data = json.loads(data_line)
                         if result_data:
                             break
-                print(result_data)
 
                 if result_data is None:
                     raise Exception("No data received from GET request")
@@ -443,48 +457,62 @@ Once you have you have completed the user's objective, and have confirmed it by 
                 self.processing = False
                 return  # Exit the loop
 
-            if not action_type or not action_element_id:
-                raise ValueError("Action type or action element ID missing in AI response")
+            # ------------------------------------------------
+            # If there's no element ID or no action_type 
+            # when it is expected, raise an error
+            # (keybind does not necessarily need element_id).
+            # ------------------------------------------------
+            if action_type not in ["complete", "keybind"] and not action_element_id:
+                raise ValueError("Action type requires an element ID, but none was provided.")
 
-            # Get the coordinates from parser_output
-            element_id = action_element_id
-            coordinates = self.parser_output['coordinates'].get(element_id)
-            if not coordinates:
-                raise ValueError(f"No coordinates found for element ID {element_id}")
+            # If we need coordinates, attempt to retrieve them 
+            # from parser_output for click-like actions
+            if action_type in ["click", "right_click", "type", "scroll"]:
+                element_id = action_element_id
+                coordinates = self.parser_output['coordinates'].get(element_id)
+                if not coordinates:
+                    raise ValueError(f"No coordinates found for element ID {element_id}")
 
-            # Coordinates are normalized [x_min, y_min, x_max, y_max]
-            x_min_norm, y_min_norm, x_max_norm, y_max_norm = coordinates
+                # Coordinates are normalized [x_min, y_min, x_max, y_max]
+                x_min_norm, y_min_norm, x_max_norm, y_max_norm = coordinates
 
-            # Compute actual coordinates
-            x_min = x_min_norm * self.image_width
-            y_min = y_min_norm * self.image_height
-            x_max = x_max_norm * self.image_width
-            y_max = y_max_norm * self.image_height
+                # Compute actual coordinates
+                x_min = x_min_norm * self.image_width
+                y_min = y_min_norm * self.image_height
+                x_max = x_max_norm * self.image_width
+                y_max = y_max_norm * self.image_height
 
-            # Get the center position
-            x_center = (x_min + (x_max / 2))
-            y_center = (y_min + (y_max / 2))
+                # Get the center position
+                x_center = (x_min + (x_max / 2))
+                y_center = (y_min + (y_max / 2))
 
-            print(f"Action: {action_type}, Element ID: {action_element_id}, Value: {value}")
-            print(f"Coordinates: {x_min}, {y_min}, {x_max}, {y_max}")
-            print(f"Center Coordinates: {x_center}, {y_center}")
+                print(f"Action: {action_type}, Element ID: {action_element_id}, Value: {value}")
+                print(f"Coordinates: {x_min}, {y_min}, {x_max}, {y_max}")
+                print(f"Center Coordinates: {x_center}, {y_center}")
 
-            # Hide the app before executing the action
-            self.hide_app()
-            # Perform the action
-            if action_type == "click":
-                self._perform_click(x_center, y_center)
-            elif action_type == "type":
-                self._perform_type(x_center, y_center, value)
-            elif action_type == "scroll":
-                self._perform_scroll(x_center, y_center)
+                self.hide_app()
+                if action_type == "click":
+                    self._perform_click(x_center, y_center)
+                elif action_type == "right_click":
+                    self._perform_right_click(x_center, y_center)
+                elif action_type == "type":
+                    self._perform_type(x_center, y_center, value)
+                elif action_type == "scroll":
+                    self._perform_scroll(x_center, y_center)
+                else:
+                    raise ValueError(f"Unknown action type: {action_type}")
+                self.show_app()
+
+            
+            elif action_type == "keybind":
+                self.hide_app()
+                self._perform_keybind(value)
+                self.show_app()
+
             else:
-                raise ValueError(f"Unknown action type: {action_type}")
+                raise ValueError(f"Unknown or unhandled action type: {action_type}")
 
-            # Restore the app window
-            self.show_app()
-
-            self.event_log.add_event("ACTION", f"Executed {action_type} on element ID {action_element_id}")
+            self.event_log.add_event("ACTION", f"Executed {action_type} action.")
             self._update_event_log()
             self.status_label.text = "Action executed"
 
@@ -508,15 +536,32 @@ Once you have you have completed the user's objective, and have confirmed it by 
         pyautogui.moveTo(x, y)
         pyautogui.click()
 
+    def _perform_right_click(self, x, y):
+        pyautogui.moveTo(x, y)
+        pyautogui.click(button='right')
+
     def _perform_type(self, x, y, text):
         pyautogui.moveTo(x, y)
         pyautogui.click()
-        time.sleep(0.5)  # Wait half a second
+        time.sleep(0.5)
         pyautogui.typewrite(text)
 
     def _perform_scroll(self, x, y):
         pyautogui.moveTo(x, y)
         pyautogui.scroll(-500)  # Scroll down
+
+    # ------------------------------------------------
+    # NEW: Perform keybind
+    # Example: value = "ctrl+c"
+    # We'll split on "+" and call pyautogui.hotkey
+    # ------------------------------------------------
+    def _perform_keybind(self, combo_str):
+        if not combo_str:
+            raise ValueError("No keybind specified")
+        keys = combo_str.lower().split("+")
+        # Cleanup in case of extra spaces
+        keys = [k.strip() for k in keys if k.strip()]
+        pyautogui.hotkey(*keys)
 
     def start_job(self, instance):
         prompt = self.user_input.text
@@ -532,9 +577,11 @@ Once you have you have completed the user's objective, and have confirmed it by 
             # Start the loop
             Clock.schedule_once(self.take_screenshot, 0.1)
 
+
 class MyKivyApp(App):
     def build(self):
         return MyAppLayout()
+
 
 if __name__ == '__main__':
     MyKivyApp().run()
